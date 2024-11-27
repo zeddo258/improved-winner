@@ -7,6 +7,7 @@ import usb.util
 from MeloTTS.melo.api import TTS
 from opencc import OpenCC
 import pygame
+import keyboard
 from usb_4_mic_array.tuning import Tuning
 from collections import Counter
 import tkinter as tk
@@ -28,6 +29,7 @@ converter = OpenCC('s2t')  # 或使用 's2tw' 轉為台灣繁體中文
 # API endpoint URL
 SENSEVOICE_URL = "http://localhost:8080/upload-audio/"
 POSTER_URL = "http://localhost:8000/ask/"
+TTS_URL = "http://localhost:5000/generate_audio"
 
 RESPEAKER_RATE = 16000
 RESPEAKER_CHANNELS = 1
@@ -132,6 +134,7 @@ class ChatbotApp:
 
 
         # Start the webcam thread
+        self.location = 0
         self.running = True
         self.is_recording = False
         self.webcam_thread = threading.Thread(target=self.show_webcam_feed)
@@ -198,13 +201,24 @@ class ChatbotApp:
         while self.is_recording:
             data = stream.read(CHUNK)
             frames.append(data)
+            self.location = Mic_tuning.direction
 
-
+        self.update_location()
         audio_bytes = b''.join(frames)
         # Convert audio to text using the server
         transcribed_text = bytes_to_text(audio_bytes)
         print(transcribed_text)
         return transcribed_text
+
+    def update_location(self):
+        if ( 121 <= self.location <= 270 ):
+            print("Turn left")
+            keyboard.press('j')
+            keyboard.release('j')
+        elif ( 271 <= self.location <= 360 or 0 <= self.location <= 59 ):
+            print("Turn right")
+            keyboard.press('l')
+            keyboard.release('l')
 
     def listen_and_process(self):
         if ( self.counter == 0 ):
@@ -284,22 +298,29 @@ class ChatbotApp:
         self.update_conversation("\n")
         self.text_to_speech(response)
         self.convo.append({'role': 'assistant', 'content': response})
+        self.poster_result = []
 
     def text_to_speech(self, text):
 
-        # Speed is adjustable
-        speed = 1
-        device = 'cuda:0'
+        # The text you want to synthesize
+        data = {"text": text}
 
-        model = TTS(language='ZH', device=device)
-        speaker_ids = model.hps.data.spk2id
+        # Send POST request
+        response = requests.post(TTS_URL, json=data)
 
-        output_path = 'zh.wav'
-        model.tts_to_file(text, speaker_ids['ZH'], output_path, speed=speed)
+        #Check if the response is successful
+        if response.status_code == 200:
+            # Write the audio content to a file
+            with open("output_client.wav", "wb") as audio_file:
+                audio_file.write(response.content)
+            print("Audio saved as 'output_client.wav'")
+        else:
+            print(f"Failed to generate audio. Status code: {response.status_code}, Error: {response.text}")
+     
 
         # 使用 pygame 播放音頻
         pygame.mixer.init()
-        pygame.mixer.music.load(output_path)
+        pygame.mixer.music.load("output_client.wav")
         pygame.mixer.music.play()
 
         # 等待音頻播放完畢
@@ -310,7 +331,7 @@ class ChatbotApp:
         pygame.mixer.music.stop()
         pygame.mixer.quit()
         # 刪除音頻文件
-        os.remove(output_path)
+        os.remove("./output_client.wav")
 
 if __name__ == "__main__":
     root = tk.Tk()
